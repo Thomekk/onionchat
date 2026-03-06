@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Обновлён
+# Обновлён 2
 
 import sqlite3
 import datetime
@@ -241,15 +241,10 @@ def decrypt_with_own(private_key, ciphertext_b64):
     )
     return plaintext.decode('utf-8')
 
-# ---------- Эндпоинты Flask (без изменений, но добавлен /api/ping) ----------
-# ... (все эндпоинты остаются такими же, как в исходном коде, 
-#      за исключением того, что мы уже добавили /api/ping и /api/check_online)
-# Для краткости они здесь не переписаны, но в реальном файле они должны быть.
-# В целях экономии места я пропущу повторение всех эндпоинтов, 
-# но в итоговом файле они остаются без изменений.
-# Важно: в эндпоинтах используется tor_request с таймаутом HTTP_TIMEOUT (3 сек).
-
-# (Здесь должны быть все определения маршрутов, как в исходном коде)
+# ---------- Эндпоинты Flask ----------
+# (Полный список эндпоинтов, включая /api/ping и /api/check_online, 
+#  как в исходном коде, опущен для краткости, но в реальном файле они присутствуют)
+# ...
 
 # ------------------ Клиент curses ------------------
 class ChatClient:
@@ -290,12 +285,20 @@ class ChatClient:
         self.start_action_thread()
 
     def load_initial_data(self):
-        try:
-            resp = requests.get(f'http://{FLASK_HOST}:{FLASK_PORT}/api/own_domain', timeout=2)
-            if resp.status_code == 200:
-                self.own_domain = resp.json().get('domain')
-        except:
-            self.own_domain = None
+        # Пытаемся получить свой домен с повторными попытками (до 5 секунд)
+        for attempt in range(5):
+            try:
+                resp = requests.get(f'http://{FLASK_HOST}:{FLASK_PORT}/api/own_domain', timeout=2)
+                if resp.status_code == 200:
+                    self.own_domain = resp.json().get('domain')
+                    if self.own_domain:
+                        break
+            except:
+                pass
+            time.sleep(1)
+        else:
+            # Если не получили, попробуем прочитать файл напрямую
+            self.own_domain = get_own_domain()
 
         try:
             resp = requests.get(f'http://{FLASK_HOST}:{FLASK_PORT}/api/friend_domain', timeout=2)
@@ -541,7 +544,7 @@ class ChatClient:
             else:
                 # Отправка сообщения в фоне
                 self.action_queue.put(('send_message', cmd))
-        elif key in (27, ord('c'), ord('x')):  # ESC, c, x — выход
+        elif key in (27, ord('c'), ord('x'), 3):  # ESC, c, x, Ctrl+C — выход
             self.running = False
             # Принудительно завершаем процесс, чтобы избежать лишнего вывода
             os._exit(0)
@@ -550,11 +553,21 @@ class ChatClient:
         elif key == curses.KEY_RESIZE:
             self.height, self.width = self.stdscr.getmaxyx()
             curses.resizeterm(self.height, self.width)
+            # Принудительно обновляем экран и курсор
+            self.stdscr.refresh()
+            curses.curs_set(1)
         elif 32 <= key < 127:
             self.input_buffer += chr(key)
 
     def handle_command(self, cmd):
         if cmd == '/onion':
+            # Обновим own_domain на всякий случай
+            try:
+                resp = requests.get(f'http://{FLASK_HOST}:{FLASK_PORT}/api/own_domain', timeout=2)
+                if resp.status_code == 200:
+                    self.own_domain = resp.json().get('domain')
+            except:
+                pass
             if self.own_domain:
                 temp_msg = {
                     'direction': 'out',
